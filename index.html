@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PLANT – Polygon Hotspot Demo (p5)</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+    canvas { display:block; }
+  </style>
+</head>
+<body>
+  <!-- p5.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+
+  <script>
+    /**
+     * Features:
+     * - Background image (cover)
+     * - Polygon hotspot (tilted card)
+     * - Hover glow + cursor HAND
+     * - Click opens modal with blurred background and floating detail image
+     * - Close by clicking X / clicking anywhere / ESC
+     * - Debug mode: press D to toggle, drag polygon points to fit the card, logs coords
+     */
+
+    let bg, detail;
+    let bgScale = 1, bgOffX = 0, bgOffY = 0;
+
+    // Background original size (for your image):
+    // 2048 x 1365
+    // Polygon points are defined in ORIGINAL IMAGE pixel coordinates.
+    // ✅ 先给一组“可用的初值”，你用 D 进入调试模式拖拽对齐即可
+    let hotspotPoly = [
+      { x: 2477, y: 1286 },  // top-left
+      { x: 2913, y: 1832 },  // top-right
+      { x: 2180, y: 2544 }, // bottom-right
+      { x: 1655, y: 1966 }  // bottom-left
+    ];
+
+    let hoverT = 0;          // 0..1 hover animation
+    let isOpen = false;      // modal open?
+    let blurredBg = null;    // cached blurred background
+    let closeBtn = { x: 0, y: 0, r: 18 };
+
+    // Debug dragging
+    let debug = false;
+    let dragIdx = -1;
+    const handleR = 10;
+
+    function preload() {
+      bg = loadImage('bg.jpg');
+      detail = loadImage('diagram1.png');
+    }
+
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+     pixelDensity(Math.min(2, displayDensity()));
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+      blurredBg = null;
+    }
+
+    // --- Cover transform ---
+    function computeCoverTransform() {
+      const s = Math.max(width / bg.width, height / bg.height);
+      const dw = bg.width * s;
+      const dh = bg.height * s;
+      const ox = (width - dw) / 2;
+      const oy = (height - dh) / 2;
+      bgScale = s;
+      bgOffX = ox;
+      bgOffY = oy;
+    }
+
+    // Map original image point -> screen
+    function imgPtToScreen(pt) {
+      return {
+        x: bgOffX + pt.x * bgScale,
+        y: bgOffY + pt.y * bgScale
+      };
+    }
+
+    // Map screen -> original image point
+    function screenPtToImg(pt) {
+      return {
+        x: (pt.x - bgOffX) / bgScale,
+        y: (pt.y - bgOffY) / bgScale
+      };
+    }
+
+    function polyToScreen(poly) {
+      return poly.map(imgPtToScreen);
+    }
+
+    // Point-in-polygon (ray casting)
+    function pointInPoly(px, py, poly) {
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].x, yi = poly[i].y;
+        const xj = poly[j].x, yj = poly[j].y;
+
+        const intersect =
+          ((yi > py) !== (yj > py)) &&
+          (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-9) + xi);
+
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function centroid(poly) {
+      let x = 0, y = 0;
+      for (const p of poly) { x += p.x; y += p.y; }
+      return { x: x / poly.length, y: y / poly.length };
+    }
+
+    // Expand polygon outward a bit (for hover glow)
+    function expandPoly(poly, amount) {
+      const c = centroid(poly);
+      return poly.map(p => {
+        const vx = p.x - c.x;
+        const vy = p.y - c.y;
+        const len = Math.hypot(vx, vy) || 1e-9;
+        const nx = vx / len;
+        const ny = vy / len;
+        return { x: p.x + nx * amount, y: p.y + ny * amount };
+      });
+    }
+
+    function drawBackground() {
+      computeCoverTransform();
+      image(bg, bgOffX, bgOffY, bg.width * bgScale, bg.height * bgScale);
+    }
+
+    function buildBlurredBackground() {
+      blurredBg = createGraphics(width, height);
+      blurredBg.pixelDensity(1);
+
+      blurredBg.push();
+      blurredBg.image(bg, bgOffX, bgOffY, bg.width * bgScale, bg.height * bgScale);
+      blurredBg.filter(BLUR, 8);
+      blurredBg.noStroke();
+      blurredBg.fill(0, 120);
+      blurredBg.rect(0, 0, width, height);
+      blurredBg.pop();
+    }
+
+    function drawPolygon(poly, doFill, doStroke) {
+      if (doFill) beginShape();
+      else beginShape();
+      for (const p of poly) vertex(p.x, p.y);
+      endShape(CLOSE);
+    }
+
+    function draw() {
+      background(0);
+      drawBackground();
+
+      const hsPoly = polyToScreen(hotspotPoly);
+      const hovering = (!isOpen) && pointInPoly(mouseX, mouseY, hsPoly);
+
+      // Cursor (hover pointer)
+      if (isOpen) cursor(ARROW);
+      else cursor(hovering ? HAND : ARROW);
+
+      // Hover animation
+      hoverT = lerp(hoverT, hovering ? 1 : 0, 0.15);
+
+      // Hover glow + outline (follows tilted polygon)
+      if (!isOpen) {
+        const glowPoly = expandPoly(hsPoly, 10 * hoverT);
+
+        push();
+        // Glow fill
+        noStroke();
+        fill(255, 26 * hoverT);
+        beginShape();
+        for (const p of glowPoly) vertex(p.x, p.y);
+        endShape(CLOSE);
+
+        // Outline
+        noFill();
+        stroke(255, 150 * hoverT);
+        strokeWeight(2);
+        beginShape();
+        for (const p of hsPoly) vertex(p.x, p.y);
+        endShape(CLOSE);
+
+        pop();
+      }
+
+      // Modal view
+      if (isOpen) {
+        if (!blurredBg) buildBlurredBackground();
+        image(blurredBg, 0, 0);
+
+        // ✅ 取消漂浮动效：固定展示
+const maxW = width * 0.72;
+const maxH = height * 0.78;
+
+const ar = detail.width / detail.height;
+let dw = maxW;
+let dh = dw / ar;
+if (dh > maxH) {
+  dh = maxH;
+  dw = dh * ar;
+}
+
+const cx = width / 2;
+const cy = height / 2; // <- 固定
+
+push();
+// shadow
+noStroke();
+fill(0, 90);
+rectMode(CENTER);
+rect(cx + 8, cy + 10, dw, dh, 14);
+
+// detail image
+imageMode(CENTER);
+image(detail, cx, cy, dw, dh);
+
+// border
+noFill();
+stroke(255, 120);
+strokeWeight(1);
+rect(cx, cy, dw, dh, 14);
+pop();
+
+        // Close button (top-right on the card)
+        closeBtn.x = cx + dw / 2 - 18;
+        closeBtn.y = cy - dh / 2 + 18;
+
+        push();
+        noStroke();
+        fill(255, 220);
+        circle(closeBtn.x, closeBtn.y, closeBtn.r * 2);
+
+        stroke(0, 180);
+        strokeWeight(2);
+        line(closeBtn.x - 6, closeBtn.y - 6, closeBtn.x + 6, closeBtn.y + 6);
+        line(closeBtn.x + 6, closeBtn.y - 6, closeBtn.x - 6, closeBtn.y + 6);
+        pop();
+
+        // Hint
+        push();
+        noStroke();
+        fill(255, 170);
+        textAlign(CENTER, CENTER);
+        textSize(12);
+        text('Click anywhere / Press ESC to close', width / 2, height - 24);
+        pop();
+      }
+
+      // Debug overlay (drag points)
+      if (debug && !isOpen) {
+        push();
+        // darken a bit for visibility
+        noStroke();
+        fill(0, 90);
+        rect(0, 0, width, height);
+
+        // redraw background over dim for reference
+        image(bg, bgOffX, bgOffY, bg.width * bgScale, bg.height * bgScale);
+
+        // draw polygon
+        const poly = polyToScreen(hotspotPoly);
+
+        noFill();
+        stroke(0, 255, 0, 220);
+        strokeWeight(2);
+        beginShape();
+        for (const p of poly) vertex(p.x, p.y);
+        endShape(CLOSE);
+
+        // draw handles
+        textAlign(LEFT, CENTER);
+        textSize(12);
+        for (let i = 0; i < poly.length; i++) {
+          const p = poly[i];
+          fill(255);
+          noStroke();
+          circle(p.x, p.y, handleR * 2);
+
+          fill(0);
+          text(`${i}`, p.x + 12, p.y);
+        }
+
+        // instructions
+        fill(255);
+        noStroke();
+        textAlign(LEFT, TOP);
+        text(
+          'DEBUG MODE (press D to toggle)\n- Drag corner points to fit the tilted card\n- Press P to print polygon coords to console',
+          16, 16
+        );
+        pop();
+      }
+    }
+
+    function mousePressed() {
+      if (!bg) return;
+
+      // If modal open: close by X or anywhere
+      if (isOpen) {
+        const d = dist(mouseX, mouseY, closeBtn.x, closeBtn.y);
+        if (d <= closeBtn.r) {
+          isOpen = false;
+          return;
+        }
+        isOpen = false;
+        return;
+      }
+
+      // Debug drag: select nearest handle
+      if (debug) {
+        const poly = polyToScreen(hotspotPoly);
+        for (let i = 0; i < poly.length; i++) {
+          if (dist(mouseX, mouseY, poly[i].x, poly[i].y) <= handleR + 4) {
+            dragIdx = i;
+            return;
+          }
+        }
+      }
+
+      // Normal: click hotspot opens modal
+      const hsPoly = polyToScreen(hotspotPoly);
+      if (pointInPoly(mouseX, mouseY, hsPoly)) {
+        isOpen = true;
+        blurredBg = null;
+      }
+    }
+
+    function mouseDragged() {
+      if (!debug) return;
+      if (dragIdx < 0) return;
+
+      // Convert dragged screen position back to image coords
+      const imgPt = screenPtToImg({ x: mouseX, y: mouseY });
+
+      // Clamp to image bounds
+      hotspotPoly[dragIdx].x = constrain(imgPt.x, 0, bg.width);
+      hotspotPoly[dragIdx].y = constrain(imgPt.y, 0, bg.height);
+    }
+
+    function mouseReleased() {
+      dragIdx = -1;
+    }
+
+    function keyPressed() {
+      if (keyCode === ESCAPE && isOpen) {
+        isOpen = false;
+        return;
+      }
+
+      if (key === 'd' || key === 'D') {
+        debug = !debug;
+        dragIdx = -1;
+        return;
+      }
+
+      if (key === 'p' || key === 'P') {
+        // Print current polygon coords (image space) to console
+        console.log('hotspotPoly = [');
+        hotspotPoly.forEach(p => console.log(`  { x: ${Math.round(p.x)}, y: ${Math.round(p.y)} },`));
+        console.log('];');
+      }
+    }
+  </script>
+</body>
+</html>
