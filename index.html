@@ -115,16 +115,7 @@ let hotspots = [
   }
 ];
 
-    // Background original size (for your image):
-    // 2048 x 1365
-    // Polygon points are defined in ORIGINAL IMAGE pixel coordinates.
-    // ✅ 先给一组“可用的初值”，你用 D 进入调试模式拖拽对齐即可
-    // let hotspotPoly = [
-    //   { x: 2477, y: 1286 },  // top-left
-    //   { x: 2913, y: 1832 },  // top-right
-    //   { x: 2180, y: 2544 }, // bottom-right
-    //   { x: 1655, y: 1966 }  // bottom-left
-    // ];
+
 
     let hoverT = 0;          // 0..1 hover animation
 
@@ -135,15 +126,15 @@ let hotspots = [
     const handleR = 10;
 
 function preload() {
-  bg = loadImage('bg.jpg');
+  bg = loadImage('bg.jpeg');
 
-//   detailImages.diagram1 = loadImage('diagram1.png');
-//   detailImages.bookletDetail = loadImage('booklet.jpg');
-//   detailImages.taxDetail = loadImage('tax.jpg');
-//   detailImages.energyDetail = loadImage('greenenergy.png');
-//   detailImages.diagram2Detail = loadImage('diagram2.jpg');
-//    detailImages.diagram3Detail = loadImage('diagram3.jpg');
-//    detailImages.magazineDetail = loadImage('magazine.png');
+  detailImages.diagram1 = loadImage('diagram1.png');
+  detailImages.bookletDetail = loadImage('booklet.jpeg');
+  detailImages.taxDetail = loadImage('tax.jpg');
+  detailImages.energyDetail = loadImage('greenenergy.jpg');
+  detailImages.diagram2Detail = loadImage('diagram2.jpg');
+   detailImages.diagram3Detail = loadImage('diagram3.jpg');
+   detailImages.magazineDetail = loadImage('magazine.jpg');
 }
 
     function setup() {
